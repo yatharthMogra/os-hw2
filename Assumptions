@@ -1,0 +1,23 @@
+In the terminal if you were to run the command foo.txt | cat the terminal outputs the quinnoldland@MacBook-Pro-3 ~ % foo.txt | cat
+zsh: command not found: foo.txt
+
+In our code we implemented a process that first reads foo.txt and pipes the output to cat. The reason we implemented this is because we needed to satisfy the flow file in the project description here: 
+
+node=read_file
+command=cat
+
+file=input_file
+name=result.txt
+
+node=word_count
+command=wc
+
+pipe=read_pipe
+from=input_file
+to=read_file
+
+pipe=process_pipe
+from=read_pipe
+to=word_count
+
+The terminal equivalent to this is result.txt | cat | wc which would be invalid which is why we made this assumption
