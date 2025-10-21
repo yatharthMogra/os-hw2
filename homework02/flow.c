@@ -45,6 +45,8 @@ Component *find_component(FlowGraph *graph, const char *name);
 
 Component *find_input_pipe_for_node(FlowGraph *graph, const char *node_name);
 
+int detect_cycles(FlowGraph *graph);
+
 void execute_action(FlowGraph *graph, const char *action_name);
 
 void execute_pipe(FlowGraph *graph, Component *pipe_comp);
@@ -212,6 +214,29 @@ FlowGraph parse_flow_file(const char *filename)
 
 void execute_action(FlowGraph *graph, const char *action_name)
 {
+  // Check if the flow graph has any nodes
+  int node_count = 0;
+  for (int i = 0; i < graph->count; i++)
+  {
+    if (graph->components[i].type == NODE)
+    {
+      node_count++;
+    }
+  }
+  
+  if (node_count == 0)
+  {
+    fprintf(stderr, "Error: Flow graph has no nodes. A flow graph must contain at least one node to be executable.\n");
+    exit(1);
+  }
+
+  // Check for cycles in the flow graph before executing
+  if (detect_cycles(graph))
+  {
+    fprintf(stderr, "Error: Cycle detected in flow graph. Aborting to prevent infinite loop.\n");
+    exit(1);
+  }
+
   Component *action = find_component(graph, action_name);
 
   if (action == NULL)
@@ -266,6 +291,13 @@ void execute_pipe(FlowGraph *graph, Component *pipe_comp)
     exit(1);
   }
 
+  // Validate pipe semantics
+  if (to_comp->type == FILE_COMP)
+  {
+    fprintf(stderr, "Error: Cannot pipe to file component '%s'. File components are data sources, not data processors.\n", to_comp->name);
+    exit(1);
+  }
+
   pid_t pid = fork();
 
   if (pid == -1)
@@ -307,6 +339,10 @@ void execute_pipe(FlowGraph *graph, Component *pipe_comp)
       close(pipe_fds[1]);
       execute_pipe(graph, from_comp);
     }
+    else if (from_comp->type == CONCATENATE)
+    {
+      execute_concatenate(graph, from_comp, pipe_fds[1]);
+    }
     // TODO: Handle other types
 
     close(pipe_fds[1]);
@@ -322,6 +358,25 @@ void execute_pipe(FlowGraph *graph, Component *pipe_comp)
   else if (to_comp->type == FILE_COMP)
   {
     execute_file(graph, to_comp, pipe_fds[0], STDOUT_FILENO);
+  }
+  else if (to_comp->type == CONCATENATE)
+  {
+    // For concatenate as 'to' component, we need to handle input from pipe
+    // We'll read from the pipe and pass it to the concatenate parts
+    char buffer[1024];
+    ssize_t bytes_read;
+    while ((bytes_read = read(pipe_fds[0], buffer, sizeof(buffer))) > 0)
+    {
+      write(STDOUT_FILENO, buffer, bytes_read);
+    }
+    close(pipe_fds[0]);
+    
+    // Then execute the concatenate parts
+    execute_concatenate(graph, to_comp, STDOUT_FILENO);
+  }
+  else if (to_comp->type == STDERR_COMP)
+  {
+    execute_stderr(graph, to_comp, STDOUT_FILENO);
   }
   // TODO: Handle other types
 
@@ -356,6 +411,7 @@ void execute_node(FlowGraph *graph, Component *node, int input_fd, int output_fd
     {
       dup2(output_fd, STDOUT_FILENO);
       close(output_fd);
+      
     }
 
     // Parse the command into arguments
@@ -495,10 +551,8 @@ void execute_file(FlowGraph *graph, Component *file_comp, int input_fd, int outp
     exit(1);
   }
 
-  // File component should act as a source of data by reading from the file
-  // and providing it to the next component in the pipe
-  // This is different from directly executing file operations - we're just
-  // providing the file content as data flow
+  // File component should read the file and provide its content as data flow
+  // This is the correct behavior for file components - they act as data sources
   
   // Open the file for reading
   int file_fd = open(file_comp->filename, O_RDONLY);
@@ -560,6 +614,167 @@ Component *find_input_pipe_for_node(FlowGraph *graph, const char *node_name)
     }
   }
   return NULL;
+}
+
+// Global variables for cycle detection (static to avoid global namespace pollution)
+static int visited[MAX_COMPONENTS];
+static int in_path[MAX_COMPONENTS];
+static FlowGraph *cycle_graph;
+
+// Helper function to perform DFS from a component
+static int dfs_visit(int component_index)
+{
+  if (in_path[component_index])
+  {
+    // Found a cycle! This component is already in the current path
+    return 1; // Cycle detected
+  }
+  
+  if (visited[component_index])
+  {
+    // Already visited this component, no cycle from here
+    return 0;
+  }
+  
+  // Mark as visited and add to current path
+  visited[component_index] = 1;
+  in_path[component_index] = 1;
+  
+  Component *comp = &cycle_graph->components[component_index];
+  
+  // Check dependencies based on component type
+  if (comp->type == PIPE)
+  {
+    // For pipes, check the 'from' component
+    if (comp->from != NULL)
+    {
+      Component *from_comp = find_component(cycle_graph, comp->from);
+      if (from_comp != NULL)
+      {
+        int from_index = from_comp - cycle_graph->components;
+        if (dfs_visit(from_index))
+        {
+          return 1; // Cycle detected
+        }
+      }
+    }
+    // Note: We don't check 'to' component for pipes because data flows in one direction
+    // A pipe from A to B is not a cycle, even if B also has a pipe to A
+  }
+  else if (comp->type == NODE)
+  {
+    // For nodes, check if there's an input pipe
+    Component *input_pipe = find_input_pipe_for_node(cycle_graph, comp->name);
+    if (input_pipe != NULL)
+    {
+      int pipe_index = input_pipe - cycle_graph->components;
+      if (dfs_visit(pipe_index))
+      {
+        return 1; // Cycle detected
+      }
+    }
+  }
+  else if (comp->type == CONCATENATE)
+  {
+    // For concatenate, check all parts
+    for (int i = 0; i < comp->parts_count; i++)
+    {
+      if (comp->parts[i] != NULL)
+      {
+        Component *part_comp = find_component(cycle_graph, comp->parts[i]);
+        if (part_comp != NULL)
+        {
+          int part_index = part_comp - cycle_graph->components;
+          if (dfs_visit(part_index))
+          {
+            return 1; // Cycle detected
+          }
+        }
+      }
+    }
+  }
+  else if (comp->type == STDERR_COMP)
+  {
+    // For stderr, check the from_node
+    if (comp->from_node != NULL)
+    {
+      Component *from_node = find_component(cycle_graph, comp->from_node);
+      if (from_node != NULL)
+      {
+        int from_index = from_node - cycle_graph->components;
+        if (dfs_visit(from_index))
+        {
+          return 1; // Cycle detected
+        }
+      }
+    }
+  }
+  // FILE_COMP and other types don't have dependencies to check
+  
+  // Remove from current path
+  in_path[component_index] = 0;
+  return 0; // No cycle found from this component
+}
+
+int detect_cycles(FlowGraph *graph)
+{
+  // Only check for true recursive cycles that would cause infinite loops:
+  // 1. Pipes that call themselves directly
+  // 2. Pipes that create recursive call chains (pipe1 → pipe2 → pipe1)
+  
+  for (int i = 0; i < graph->count; i++)
+  {
+    Component *comp = &graph->components[i];
+    
+    // Check for direct self-reference in pipes
+    if (comp->type == PIPE && comp->from != NULL && comp->to != NULL)
+    {
+      if (strcmp(comp->from, comp->name) == 0 || strcmp(comp->to, comp->name) == 0)
+      {
+        return 1; // Direct self-reference cycle
+      }
+    }
+  }
+  
+  // Check for recursive pipe chains (pipe calling other pipes)
+  for (int i = 0; i < graph->count; i++)
+  {
+    Component *comp = &graph->components[i];
+    if (comp->type == PIPE && comp->from != NULL)
+    {
+      Component *from_comp = find_component(graph, comp->from);
+      if (from_comp != NULL && from_comp->type == PIPE)
+      {
+        // This pipe's 'from' is another pipe, check if it creates a cycle
+        if (strcmp(from_comp->name, comp->name) == 0)
+        {
+          return 1; // Direct pipe-to-pipe cycle
+        }
+        
+        // Check if the from pipe eventually leads back to this pipe
+        Component *current = from_comp;
+        int depth = 0;
+        while (current != NULL && current->type == PIPE && depth < MAX_COMPONENTS)
+        {
+          if (strcmp(current->name, comp->name) == 0)
+          {
+            return 1; // Recursive pipe cycle detected
+          }
+          if (current->from != NULL)
+          {
+            current = find_component(graph, current->from);
+          }
+          else
+          {
+            current = NULL;
+          }
+          depth++;
+        }
+      }
+    }
+  }
+  
+  return 0; // No cycles found
 }
 
 char **parse_command(const char *command)
