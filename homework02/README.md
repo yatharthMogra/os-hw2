@@ -1,6 +1,24 @@
 # Extra credit
 We are submitting the file component implementation for extra credit
 
+## Assumption in implemetning file
+```text
+node=read_file
+command=cat
+
+file=input_file
+name=result.txt
+
+node=word_count
+command=wc
+
+pipe=read_pipe
+from=input_file
+to=read_file
+```
+
+the flow graph above in simple bash language would translate to foo.txt | cat. This command in terminal would simply return error as foo.txt is not a valid command. However as stated in the homework2 document this command is supposed to work for FILE component, so read_pipe would give an output similar to cat foo.txt.
+
 # Flow System Implementation
 
 ## Component Design and Implementation
