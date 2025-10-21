@@ -1,5 +1,5 @@
 a) NetID of first partner : <qo237>
-b) NetID of second partner : <ym347>
+b) NetID of second partner : <ym3470>
 c) Full Name of first partner : <Quincy Oldland>
 d) Full Name of second partner : <Yatharth Mogra>
 e) Github Account Name of first partner : <qo237>

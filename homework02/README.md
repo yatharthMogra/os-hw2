@@ -1,238 +1,140 @@
-````markdown
-# Homework 2: Pipe Flow
+# Flow System Implementation
 
-## Introduction
+## Component Design and Implementation
 
-In this homework, you will implement a custom process chaining system similar to Linux shell pipelines. You will create a program named `flow.c` that interprets a `.flow` file, describing processes and how their outputs and inputs are connected.
+This document describes how each component type has been designed and implemented in the flow system.
 
-You can complete this homework on Linux, WSL (Windows Subsystem for Linux), or Mac. Standard libraries are allowed. Working with a partner is also permitted.
+### 1. NODE Component
 
----
+**Purpose**: Executes shell commands with proper input/output redirection.
 
-## Examples in Bash
+**Implementation**:
+- Uses `fork()` and `execvp()` to execute commands
+- Handles stdin/stdout redirection via file descriptors
+- Supports command parsing with quoted arguments
+- Maintains proper stderr separation (stderr stays on stderr, not through pipes)
 
-### Simple Pipe
+**Key Features**:
+- Command parsing with support for quoted strings
+- Proper process management with fork/exec
+- Input/output redirection handling
 
-```bash
-ls | wc
-````
+### 2. PIPE Component
 
-Counts the number of files, words, and characters in the current directory.
+**Purpose**: Connects output of one component to input of another component.
 
-### Output Redirection
+**Implementation**:
+- Creates Unix pipes using `pipe()` system call
+- Uses `fork()` to create separate processes for source and destination
+- Handles all component types as both source and destination
+- Supports recursive pipe execution (pipes calling other pipes)
 
-```bash
-ls > result.txt
-wc < result.txt
-```
+**Key Features**:
+- Bidirectional pipe support (from/to any component type)
+- Recursive pipe execution for complex flows
+- Proper file descriptor management
+- Input pipe detection for nodes
 
-Writes the output of `ls` to a file and reads it with `wc`.
+### 3. FILE Component
 
-### Error Redirection
+**Purpose**: Acts as a data source by reading file content and providing it to the pipeline.
 
-```bash
-mkdir a | wc      # Only stdout is piped
-mkdir a |& wc     # Both stdout and stderr are piped
-mkdir a 2>&1 | wc # Alternative way to redirect stderr to stdout
-```
+**Implementation**:
+- Opens files using `open()` system call
+- Reads file content and writes to output stream
+- Acts as data source only (cannot be pipe destination)
+- Handles file not found errors gracefully
 
-### Complex Example
+**Key Features**:
+- File content streaming
+- Error handling for missing files
+- Data source semantics (cannot receive input)
+- Proper file descriptor management
 
-```bash
-echo "f o o" > foo.txt
-(cat foo.txt; cat foo.txt | sed 's/o/u/g') | wc
-```
+### 4. CONCATENATE Component
 
-Combines multiple commands and pipes their outputs sequentially.
+**Purpose**: Executes multiple components sequentially and combines their outputs.
 
----
+**Implementation**:
+- Iterates through all parts sequentially
+- Uses `fork()` for each part execution
+- Waits for each part to complete before next
+- Supports input from pipes when used as destination
 
-## .flow Language Specification
+**Key Features**:
+- Sequential execution of parts
+- Process management for each part
+- Input handling from pipes
+- Output redirection support
 
-### Core Components
+### 5. STDERR Component
 
-* **node**: Represents a process.
+**Purpose**: Captures stderr output from a node and redirects it to stdout.
 
-  ```
-  node=<name>
-  command=<command_string>
-  ```
+**Implementation**:
+- Creates pipes to capture stderr from source node
+- Redirects stderr to pipe, stdout to /dev/null
+- Reads from pipe and outputs to destination
+- Uses `dup2()` for proper redirection
 
-* **pipe**: Connects output of one component to input of another.
+**Key Features**:
+- Stderr capture and redirection
+- Process isolation for stderr capture
+- Proper file descriptor management
 
-  ```
-  pipe=<name>
-  from=<source_name>
-  to=<destination_name>
-  ```
+## Safety and Validation Features
 
-* **concatenate**: Executes multiple components sequentially.
+### Cycle Detection
+- **Purpose**: Prevents infinite loops in flow graphs
+- **Implementation**: DFS-based algorithm to detect recursive cycles
+- **Scope**: Detects direct self-reference and recursive pipe chains
+- **Validation**: Only flags true recursive cycles, allows valid data flow
 
-  ```
-  concatenate=<name>
-  parts=<number_of_parts>
-  part_0=<component_name>
-  part_1=<component_name>
-  ...
-  ```
+### Node Count Validation
+- **Purpose**: Ensures flow graphs are executable
+- **Implementation**: Counts NODE components before execution
+- **Validation**: Requires at least one node for execution
 
-* **stderr**: Captures standard error from a node.
-
-  ```
-  stderr=<name>
-  from=<node_name>
-  ```
-
-### Extra Credit Components
-
-* **file**: Specifies a file as input or output.
-
-  ```
-  file=<name>
-  name=<filename>
-  ```
-
----
-
-## Example `.flow` Files
-
-### Simple Pipe (`filecount.flow`)
-
-```text
-node=list_files
-command=ls
-
-node=word_count
-command=wc
-
-pipe=doit
-from=list_files
-to=word_count
-```
-
-Run with:
-
-```bash
-./flow filecount.flow doit
-```
-
-### Complex Example (`complicated.flow`)
-
-```text
-node=cat_foo
-command=cat foo.txt
-
-node=sed_o_u
-command=sed 's/o/u/g'
-
-pipe=foo_to_fuu
-from=cat_foo
-to=sed_o_u
-
-concatenate=foo_then_fuu
-parts=2
-part_0=cat_foo
-part_1=foo_to_fuu
-
-node=word_count
-command=wc
-
-pipe=shenanigan
-from=foo_then_fuu
-to=word_count
-```
-
-Run with:
-
-```bash
-./flow complicated.flow shenanigan
-```
-
-### Error Handling Example
-
-```text
-node=mkdir_attempt
-command=mkdir a
-
-node=word_count
-command=wc
-
-stderr=stdout_to_stderr_for_mkdir
-from=mkdir_attempt
-
-pipe=catch_errors
-from=stdout_to_stderr_for_mkdir
-to=word_count
-```
-
-### File Handling Example (Extra Credit)
-
-```text
-node=read_file
-command=cat
-
-file=input_file
-name=result.txt
-
-node=word_count
-command=wc
-
-pipe=read_pipe
-from=input_file
-to=read_file
-
-pipe=process_pipe
-from=read_pipe
-to=word_count
-```
-
----
-
-## Instructions
-
-1. Write a program `flow.c` that reads a `.flow` file.
-2. Execute the commands defined in the file, connecting their inputs and outputs according to the flow graph.
-3. The program should take two arguments: the flow file and the name of the final action to execute.
-
-Example:
-
-```bash
-./flow filecount.flow doit
-```
-
----
-
-## FAQ
-
-* **Do you need to implement all redirections?**
-  No. All redirections can be handled using pipes.
-
-* **How to do `ls > foo.txt`?**
-  Use `tee`:
-
-  ```text
-  node=list_dir
-  command=ls
-
-  node=tee_to_foo
-  command=tee foo.txt
-
-  pipe=ls_to_foo
-  from=list_dir
-  to=tee_to_foo
-  ```
-
-* **How to do input redirection (`wc < foo.txt`)?**
-  Equivalent flow:
-
-  ```text
-  node=cat_foo
-  command=cat foo.txt
-
-  node=word_count
-  command=wc
-
-  pipe=cat_to_wc
-  from=cat_foo
-  to=word_count
-  ```
+### Pipe Semantics Validation
+- **Purpose**: Prevents invalid pipe configurations
+- **Implementation**: Validates that file components cannot be pipe destinations
+- **Validation**: File components are data sources, not data processors
+
+### Component Existence Validation
+- **Purpose**: Ensures all referenced components exist
+- **Implementation**: Validates component references in pipes and concatenates
+- **Validation**: Aborts on missing component references
+
+## Execution Flow
+
+1. **Parse Flow File**: Parse .flow file into component graph
+2. **Validate Graph**: Check for cycles, node count, and semantic validity
+3. **Execute Action**: Find and execute the specified action component
+4. **Process Management**: Handle forks, pipes, and process coordination
+5. **Cleanup**: Wait for all child processes and clean up resources
+
+## Key Design Decisions
+
+- **Process Model**: Each component execution uses fork/exec for isolation
+- **Pipe Semantics**: Mimics shell pipe behavior for stdout/stderr separation
+- **Error Handling**: Comprehensive validation before execution
+- **Memory Management**: Proper cleanup of file descriptors and processes
+- **Recursive Execution**: Supports complex nested pipe structures
+
+## Supported Flow Patterns
+
+- **Simple Pipes**: `node1 → node2`
+- **File Input**: `file → node`
+- **Concatenation**: `concat → node`
+- **Stderr Capture**: `stderr → node`
+- **Complex Chains**: `file → node1 → node2 → concat`
+- **Nested Pipes**: `pipe1 → pipe2 → node`
+
+## Error Conditions Handled
+
+- Missing files
+- Invalid component references
+- Cyclic dependencies
+- Empty flow graphs
+- Invalid pipe destinations
+- Command execution failures
