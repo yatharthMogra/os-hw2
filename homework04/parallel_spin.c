@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <stdatomic.h>
 
 #define NUM_BUCKETS 5     // Buckets in hash table
 #define NUM_KEYS 100000   // Number of keys inserted per thread
@@ -17,11 +18,21 @@ typedef struct _bucket_entry {
 } bucket_entry;
 
 bucket_entry *table[NUM_BUCKETS];
-pthread_spinlock_t table_lock;  // Single spinlock for entire table
+atomic_int table_lock;  // Single spinlock for entire table (0 = unlocked, 1 = locked)
 
-// Note: pthread_spinlock_t is Linux-specific and not available on macOS
-// This code will compile and run on Linux systems
-// For macOS, you would need to use a custom spinlock implementation
+// Custom spinlock implementation using atomic operations (works on both macOS and Linux)
+void spin_lock(atomic_int *lock) {
+  // Try to acquire lock by atomically exchanging 0 with 1
+  // If lock was already 1, keep spinning until it becomes 0
+  while (atomic_exchange(lock, 1) == 1) {
+    // Busy wait - spin until lock is available
+  }
+}
+
+void spin_unlock(atomic_int *lock) {
+  // Release lock by setting it back to 0
+  atomic_store(lock, 0);
+}
 
 void panic(char *msg) {
   printf("%s\n", msg);
@@ -41,12 +52,12 @@ void insert(int key, int val) {
   if (!e) panic("No memory to allocate bucket!");
   
   // Lock the entire table before modifying using spinlock
-  pthread_spin_lock(&table_lock);
+  spin_lock(&table_lock);
   e->next = table[i];
   e->key = key;
   e->val = val;
   table[i] = e;
-  pthread_spin_unlock(&table_lock);
+  spin_unlock(&table_lock);
 }
 
 // Retrieves an entry from the hash table by key
@@ -56,15 +67,15 @@ bucket_entry * retrieve(int key) {
   int i = key % NUM_BUCKETS;
   
   // Lock the entire table before reading using spinlock
-  pthread_spin_lock(&table_lock);
+  spin_lock(&table_lock);
   for (b = table[i]; b != NULL; b = b->next) {
     if (b->key == key) {
       bucket_entry *result = b;
-      pthread_spin_unlock(&table_lock);
+      spin_unlock(&table_lock);
       return result;
     }
   }
-  pthread_spin_unlock(&table_lock);
+  spin_unlock(&table_lock);
   return NULL;
 }
 
@@ -106,10 +117,8 @@ int main(int argc, char **argv) {
     panic("must enter a valid number of threads to run");
   }
 
-  // Initialize the spinlock
-  if (pthread_spin_init(&table_lock, PTHREAD_PROCESS_PRIVATE) != 0) {
-    panic("spinlock initialization failed");
-  }
+  // Initialize spinlock to unlocked state (0)
+  atomic_init(&table_lock, 0);
 
   srandom(time(NULL));
   for (i = 0; i < NUM_KEYS; i++)
@@ -154,8 +163,7 @@ int main(int argc, char **argv) {
 
   printf("[main] Retrieved %ld/%d keys in %f seconds\n", NUM_KEYS - total_lost, NUM_KEYS, end - start);
 
-  // Clean up spinlock
-  pthread_spin_destroy(&table_lock);
+  // No cleanup needed for atomic_int (no resources to free)
 
   return 0;
 }

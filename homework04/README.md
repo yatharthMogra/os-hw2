@@ -118,12 +118,16 @@ I expect **spinlocks to perform similarly or slightly better than mutexes** (5-1
 
 **File:** `parallel_spin.c`
 
-Replaces all mutex operations with spinlock operations:
-- `pthread_mutex_t` → `pthread_spinlock_t`
-- `pthread_mutex_lock()` → `pthread_spin_lock()`
-- `pthread_mutex_unlock()` → `pthread_spin_unlock()`
+Replaces all mutex operations with spinlock operations using a custom atomic-based implementation:
+- `pthread_mutex_t` → `atomic_int` (custom spinlock)
+- `pthread_mutex_lock()` → `spin_lock()` (custom function using `atomic_exchange`)
+- `pthread_mutex_unlock()` → `spin_unlock()` (custom function using `atomic_store`)
 
-**Note:** `pthread_spinlock_t` is Linux-specific. This code requires a Linux system to compile and run.
+**Implementation Details:**
+- Uses `stdatomic.h` for cross-platform atomic operations
+- Custom `spin_lock()` function: busy-waits using `atomic_exchange` until lock is available
+- Custom `spin_unlock()` function: releases lock using `atomic_store`
+- **Works on both macOS and Linux** (unlike `pthread_spinlock_t` which is Linux-specific)
 
 ### Performance Comparison
 
@@ -134,7 +138,7 @@ Replaces all mutex operations with spinlock operations:
 - **Y-axis:** Total execution time (insert + retrieve) in seconds
 - **Red line:** Original (incorrect)
 - **Blue line:** Mutex (correct)
-- **Green line:** Spinlock (correct) - *Note: Not available on macOS, requires Linux*
+- **Green line:** Spinlock (correct) - *Works on both macOS and Linux using atomic operations*
 
 ### Time Overhead Estimate
 
@@ -336,7 +340,7 @@ gcc -pthread parallel_mutex_opt.c -o parallel_mutex_opt
 # Run
 ./parallel_hashtable <num_threads>
 ./parallel_mutex <num_threads>
-./parallel_spin <num_threads>        # Requires Linux
+./parallel_spin <num_threads>        # Works on macOS and Linux
 ./parallel_mutex_opt <num_threads>
 
 # Generate plots
@@ -347,7 +351,7 @@ python3 generate_plot.py
 
 ## Assumptions
 
-1. **Platform:** Code tested on Linux. `pthread_spinlock_t` is Linux-specific and will not compile on macOS.
+1. **Platform:** Code tested on both macOS and Linux. The spinlock implementation uses atomic operations (`stdatomic.h`) for cross-platform compatibility.
 2. **Key Distribution:** Assumes keys are randomly distributed across buckets via `key % NUM_BUCKETS`.
 3. **Workload:** Benchmark separates insert and retrieve phases. Mixed workloads may have different characteristics.
 
@@ -357,7 +361,7 @@ python3 generate_plot.py
 
 All implementations verified:
 - ✅ `parallel_mutex.c`: 0 keys lost with any number of threads
-- ✅ `parallel_spin.c`: 0 keys lost (on Linux systems)
+- ✅ `parallel_spin.c`: 0 keys lost (works on both macOS and Linux)
 - ✅ `parallel_mutex_opt.c`: 0 keys lost, with improved performance for retrievals and insertions
 
 Test with: `./parallel_mutex_opt 8`
