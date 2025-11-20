@@ -51,7 +51,7 @@ Uses a single global mutex (`pthread_mutex_t table_lock`) to protect all critica
 
 ### Performance Comparison
 
-![Mutex Performance Comparison](mutex_performance_comparison.png)
+![Mutex Performance Comparison](./images/mutex_performance_comparison.png)
 
 **Graph Description:**
 - **X-axis:** Number of threads (1, 2, 4, 8, 16)
@@ -127,7 +127,7 @@ Replaces all mutex operations with spinlock operations:
 
 ### Performance Comparison
 
-![Spinlock Performance Comparison](spinlock_performance_comparison.png)
+![Spinlock Performance Comparison](./images/spinlock_performance_comparison.png)
 
 **Graph Description:**
 - **X-axis:** Number of threads (1, 2, 4, 8, 16)
