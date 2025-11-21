@@ -54,7 +54,7 @@ Uses a single global mutex (`pthread_mutex_t table_lock`) to protect all critica
 ![Mutex Performance Comparison](./images/mutex_performance_comparison.png)
 
 **Graph Description:**
-- **X-axis:** Number of threads (1, 2, 4, 8, 16)
+- **X-axis:** Number of threads (1, 2, 4, 8, 16, 32, 64, 128, 256) - multiples of 2 until 256
 - **Y-axis:** Total execution time (insert + retrieve) in seconds
 - **Red line:** Original (incorrect) - faster but loses keys
 - **Blue line:** Mutex (correct) - slower but guarantees correctness
@@ -134,7 +134,7 @@ Replaces all mutex operations with spinlock operations using a custom atomic-bas
 ![Spinlock Performance Comparison](./images/spinlock_performance_comparison.png)
 
 **Graph Description:**
-- **X-axis:** Number of threads (1, 2, 4, 8, 16)
+- **X-axis:** Number of threads (1, 2, 4, 8, 16, 32, 64, 128, 256) - multiples of 2 until 256
 - **Y-axis:** Total execution time (insert + retrieve) in seconds
 - **Red line:** Original (incorrect)
 - **Blue line:** Mutex (correct)
