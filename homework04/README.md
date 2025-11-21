@@ -298,8 +298,8 @@ void insert(int key, int val) {
 
 | Implementation | Lock Type | Parallelism |
 |---------------|-----------|-------------|
-| `parallel_mutex.c` | Single global lock | ❌ None (all serialize) |
-| `parallel_mutex_opt.c` | Per-bucket locks | ✅ Yes (different buckets in parallel) |
+| `parallel_mutex.c` | Single global lock | None (all serialize) |
+| `parallel_mutex_opt.c` | Per-bucket locks | Yes (different buckets in parallel) |
 
 **Performance Benefit:**
 - **Theoretical speedup:** Up to 5x for insert phase (one insertion per bucket simultaneously)
@@ -351,7 +351,7 @@ python3 generate_plot.py
 
 ## Assumptions
 
-1. **Platform:** Code tested on both macOS and Linux. The spinlock implementation uses atomic operations (`stdatomic.h`) for cross-platform compatibility.
+1. **Platform:** Code tested on macOS. The spinlock implementation uses atomic operations (`stdatomic.h`) for cross-platform compatibility.
 2. **Key Distribution:** Assumes keys are randomly distributed across buckets via `key % NUM_BUCKETS`.
 3. **Workload:** Benchmark separates insert and retrieve phases. Mixed workloads may have different characteristics.
 
@@ -360,9 +360,9 @@ python3 generate_plot.py
 ## Verification
 
 All implementations verified:
-- ✅ `parallel_mutex.c`: 0 keys lost with any number of threads
-- ✅ `parallel_spin.c`: 0 keys lost (works on both macOS and Linux)
-- ✅ `parallel_mutex_opt.c`: 0 keys lost, with improved performance for retrievals and insertions
+- `parallel_mutex.c`: 0 keys lost with any number of threads
+- `parallel_spin.c`: 0 keys lost (works on both macOS and Linux)
+- `parallel_mutex_opt.c`: 0 keys lost, with improved performance for retrievals and insertions
 
 Test with: `./parallel_mutex_opt 8`
 
